@@ -1,0 +1,6 @@
+{
+  "name": "Bunkering Flow - Dashboard Operasional Minyak & BBM",
+  "description": "Sistem Dashboard Operasional & Monitoring Bunkering Bahan Bakar terintegrasi Google Spreadsheet dan Excel dengan pelaporan otomatis serta visualisasi data real-time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
