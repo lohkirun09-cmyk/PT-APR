@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -9,10 +8,15 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  // Dev server and container proxy expect the app to listen on port 3000
-  const PORT = 3000;
+  // Support Cloud Run port injection (PORT env var), defaulting to 3000 for local dev
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
+
+  // Health check endpoint for Cloud Run container rollout & load balancer
+  app.get(['/healthz', '/api/health'], (_req, res) => {
+    res.status(200).json({ status: 'ok', uptime: process.uptime(), port: PORT });
+  });
 
   // Proxy endpoint to fetch Google Sheet content server-side without CORS or GID issues
   app.get('/api/fetch-sheet', async (req, res) => {
@@ -121,6 +125,12 @@ async function startServer() {
       }
 
       if (response.ok) {
+        if (responseJson && (responseJson.status === 'error' || responseJson.success === false)) {
+          return res.status(400).json({
+            error: responseJson.message || 'Google Apps Script melaporkan kesalahan saat menulis ke spreadsheet',
+            details: responseJson,
+          });
+        }
         return res.json({
           success: true,
           message: 'Data transaksi berhasil terkirim dan tercatat di Google Spreadsheet!',
@@ -140,7 +150,18 @@ async function startServer() {
   });
 
   const distPath = path.join(__dirname, 'dist');
-  const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+  let hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+
+  if (!hasDist && process.env.NODE_ENV === 'production') {
+    try {
+      const { execSync } = await import('child_process');
+      console.log('Production mode detected with missing dist. Running vite build...');
+      execSync('npx vite build', { stdio: 'inherit' });
+      hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+    } catch (e) {
+      console.error('Failed to auto-build dist:', e);
+    }
+  }
 
   if (process.env.NODE_ENV === 'production' || hasDist) {
     app.use(express.static(distPath));
@@ -148,6 +169,7 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

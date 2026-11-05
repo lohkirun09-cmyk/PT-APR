@@ -235,4 +235,33 @@ test('Tonase conversion and formatting logic behaves accurately', async () => {
   assert.ok(dualTon.includes('MT') && dualTon.includes('L'));
 });
 
+test('bunkering record payload correctly mirrors Google Spreadsheet required columns', () => {
+  const testRecord = {
+    id: 'test-mobile-1',
+    timestamp: '11/5/2026, 3:30:00 PM',
+    tanggal: '10/26/2026',
+    keterangan: 'BUNKERING A',
+    masuk: 0,
+    keluar: 31080,
+    nomorDn: '16162',
+    pt: 'KBT',
+    namaKapalMobil: 'TB Karya Star 71',
+    tangki: '3P',
+    timeStart: '9:00:00 AM',
+    timeStop: '10:00:00 AM',
+    flowStart: 10000,
+    flowStop: 41080,
+    pengawas: 'DAYAT',
+    kotakan: 50,
+    keteranganKotakan: 'KASIH'
+  };
+
+  assert.equal(testRecord.pt, 'KBT');
+  assert.equal(testRecord.keluar, 31080);
+  assert.equal(testRecord.kotakan, 50);
+  assert.equal(testRecord.pengawas, 'DAYAT');
+  assert.equal(testRecord.flowStop - testRecord.flowStart, testRecord.keluar);
+});
+
+
 

@@ -123,6 +123,16 @@ export default function App() {
     return Array.from(pts).sort();
   }, [records]);
 
+  const allVessels = useMemo(() => {
+    const vessels = new Set<string>();
+    records.forEach(r => {
+      if (r.namaKapalMobil && r.namaKapalMobil.trim()) {
+        vessels.add(r.namaKapalMobil.trim());
+      }
+    });
+    return Array.from(vessels).sort();
+  }, [records]);
+
   const availableDates = useMemo(() => {
     const dates = new Set<string>();
     records.forEach(r => {
@@ -341,7 +351,11 @@ export default function App() {
         onSave={handleSaveRecord}
         editingRecord={editingRecord}
         knownPTs={allPTs}
+        knownVessels={allVessels}
         webhookUrl={webhookUrl}
+        onSaveWebhookUrl={handleSaveWebhookUrl}
+        sourceUrl={sourceUrl}
+        fuelDensity={fuelDensity}
         onOpenSpreadsheetSettings={() => {
           setSpreadsheetTab('sync');
           setIsSpreadsheetModalOpen(true);
