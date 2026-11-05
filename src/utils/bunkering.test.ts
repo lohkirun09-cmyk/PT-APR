@@ -263,5 +263,87 @@ test('bunkering record payload correctly mirrors Google Spreadsheet required col
   assert.equal(testRecord.flowStop - testRecord.flowStart, testRecord.keluar);
 });
 
+test('detectTransactionAnomalies accurately identifies flow meter mismatches, duplicate DN, zero volume, and kotakan conflicts', async () => {
+  const { detectTransactionAnomalies } = await import('./bunkeringData');
 
+  const sampleRecords = [
+    {
+      id: 'r1',
+      timestamp: '11/5/2026',
+      tanggal: '10/26/2026',
+      keterangan: 'BUNKERING A',
+      masuk: 0,
+      keluar: 10000,
+      nomorDn: 'DN-9901',
+      pt: 'PT Testing',
+      namaKapalMobil: 'TB Test 1',
+      tangki: '3P',
+      timeStart: '08:00',
+      timeStop: '09:00',
+      flowStart: 5000,
+      flowStop: 18000, // delta is 13000, but keluar is 10000 -> mismatch 3000!
+      pengawas: 'DAYAT',
+      kotakan: 50,
+      keteranganKotakan: 'KASIH'
+    },
+    {
+      id: 'r2',
+      timestamp: '11/5/2026',
+      tanggal: '10/26/2026',
+      keterangan: 'BUNKERING A',
+      masuk: 0,
+      keluar: 5000,
+      nomorDn: 'DN-9901', // duplicate DN-9901!
+      pt: 'PT Testing',
+      namaKapalMobil: 'TB Test 2',
+      tangki: '4P',
+      timeStart: '09:00',
+      timeStop: '10:00',
+      flowStart: 18000,
+      flowStop: 23000, // delta 5000 matches!
+      pengawas: 'DAYAT',
+      kotakan: 0,
+      keteranganKotakan: 'KASIH' // Conflict: kotakan is 0 but status says KASIH
+    },
+    {
+      id: 'r3',
+      timestamp: '11/5/2026',
+      tanggal: '10/26/2026',
+      keterangan: 'BUNKERING B',
+      masuk: 0,
+      keluar: 0, // Zero volume warning!
+      nomorDn: 'DN-9902',
+      pt: 'PT Kosong',
+      namaKapalMobil: 'TB Test 3',
+      tangki: '1S',
+      timeStart: '',
+      timeStop: '',
+      flowStart: 0,
+      flowStop: 0,
+      pengawas: 'LOLI',
+      kotakan: 50,
+      keteranganKotakan: 'TIDAK KASIH' // Conflict: kotakan is 50 but status is TIDAK KASIH
+    }
+  ];
 
+  const anomalies = detectTransactionAnomalies(sampleRecords);
+  assert.ok(anomalies.length >= 3, `Expected at least 3 anomalies, got ${anomalies.length}`);
+
+  const flowMismatch = anomalies.find(a => a.type === 'flow_mismatch');
+  assert.ok(flowMismatch, 'Must detect flow_mismatch');
+  assert.equal(flowMismatch.record.id, 'r1');
+  assert.equal(flowMismatch.field, 'keluar');
+  assert.equal(flowMismatch.suggestedValue, 13000);
+
+  const duplicateDn = anomalies.find(a => a.type === 'duplicate_dn');
+  assert.ok(duplicateDn, 'Must detect duplicate_dn');
+  assert.equal(duplicateDn.record.nomorDn, 'DN-9901');
+
+  const zeroVolume = anomalies.find(a => a.type === 'zero_volume');
+  assert.ok(zeroVolume, 'Must detect zero_volume');
+  assert.equal(zeroVolume.record.id, 'r3');
+
+  const kotakanConflict = anomalies.find(a => a.type === 'kotakan_conflict');
+  assert.ok(kotakanConflict, 'Must detect kotakan_conflict');
+  assert.equal(kotakanConflict.suggestedValue, 'KASIH');
+});

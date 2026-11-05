@@ -11,7 +11,8 @@ import {
   Clock,
   Gauge,
   Fuel,
-  FileText
+  FileText,
+  Wrench
 } from 'lucide-react';
 import {
   BunkeringRecord,
@@ -27,6 +28,7 @@ interface DataTableProps {
   records: BunkeringRecord[];
   onEditRecord: (record: BunkeringRecord) => void;
   onDeleteRecord: (id: string) => void;
+  onOpenCorrectionModal?: () => void;
   unitMode?: UnitMode;
   density?: number;
 }
@@ -38,6 +40,7 @@ export const DataTable: React.FC<DataTableProps> = ({
   records,
   onEditRecord,
   onDeleteRecord,
+  onOpenCorrectionModal,
   unitMode = 'LITER',
   density = DEFAULT_DENSITY
 }) => {
@@ -97,24 +100,37 @@ export const DataTable: React.FC<DataTableProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3 self-stretch sm:self-auto justify-between">
-          <span className="text-xs text-slate-400">
-            Baris per halaman:
-          </span>
-          <select
-            value={pageSize}
-            onChange={e => {
-              setPageSize(Number(e.target.value));
-              setCurrentPage(1);
-            }}
-            className="bg-slate-950 border border-slate-800 text-white text-xs rounded-lg px-2 py-1 focus:ring-1 focus:ring-amber-500 cursor-pointer"
-          >
-            <option value={10}>10</option>
-            <option value={15}>15</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
+        <div className="flex flex-wrap items-center gap-2.5 self-stretch sm:self-auto justify-between sm:justify-end">
+          {onOpenCorrectionModal && (
+            <button
+              onClick={onOpenCorrectionModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-semibold transition-colors cursor-pointer shadow-sm"
+              title="Buka alat bantu perbaikan dan koreksi salah input"
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              <span>Alat Koreksi</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">
+              Baris:
+            </span>
+            <select
+              value={pageSize}
+              onChange={e => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="bg-slate-950 border border-slate-800 text-white text-xs rounded-lg px-2 py-1 focus:ring-1 focus:ring-amber-500 cursor-pointer"
+            >
+              <option value={10}>10</option>
+              <option value={15}>15</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
         </div>
       </div>
 

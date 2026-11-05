@@ -1,15 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  parseBunkeringCSV,
-  filterRecords,
-  calculateDashboardMetrics,
-  BunkeringRecord,
-  FilterState,
-  INITIAL_CSV_RAW,
-  UnitMode,
-  DEFAULT_DENSITY,
-  formatLiter
-} from './utils/bunkeringData';
 import { exportBunkeringToExcel } from './utils/excelExporter';
 import { Header } from './components/Header';
 import { FilterBar } from './components/FilterBar';
@@ -20,7 +9,21 @@ import { DataTable } from './components/DataTable';
 import { SpreadsheetModal } from './components/SpreadsheetModal';
 import { AddRecordModal } from './components/AddRecordModal';
 import { MonthlyReportModal } from './components/MonthlyReportModal';
-import { Check, Info, FileSpreadsheet, Sparkles } from 'lucide-react';
+import { CorrectionModal } from './components/CorrectionModal';
+import { Check, Info, FileSpreadsheet, Sparkles, Wrench } from 'lucide-react';
+import {
+  BunkeringRecord,
+  FilterState,
+  UnitMode,
+  DEFAULT_DENSITY,
+  INITIAL_CSV_RAW,
+  parseBunkeringCSV,
+  filterRecords,
+  calculateDashboardMetrics,
+  CorrectionLogEntry,
+  detectTransactionAnomalies,
+  saveOrUpdateRecordToSpreadsheet
+} from './utils/bunkeringData';
 
 const STORAGE_KEY = 'bunkering_records_data_v1';
 const SOURCE_KEY = 'bunkering_source_url_v1';
@@ -102,8 +105,36 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isMonthlyPdfModalOpen, setIsMonthlyPdfModalOpen] = useState(false);
   const [pdfModalInitialTab, setPdfModalInitialTab] = useState<'OPERASIONAL' | 'KOTAKAN_KAPAL'>('OPERASIONAL');
+  const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<BunkeringRecord | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Correction history state for audit trail & Undo
+  const [correctionHistory, setCorrectionHistory] = useState<CorrectionLogEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('bunkering_correction_history_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to load correction history', e);
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('bunkering_correction_history_v1', JSON.stringify(correctionHistory));
+    } catch (e) {
+      console.warn('Storage quota exceeded for correction history', e);
+    }
+  }, [correctionHistory]);
+
+  // Detected anomalies across all records
+  const anomalies = useMemo(() => {
+    return detectTransactionAnomalies(records);
+  }, [records]);
 
   // Save records to LocalStorage
   useEffect(() => {
@@ -192,6 +223,89 @@ export default function App() {
     setEditingRecord(null);
   };
 
+  const handleApplyCorrection = async (updatedRecord: BunkeringRecord, reason?: string) => {
+    const oldRecord = records.find(r => r.id === updatedRecord.id);
+    if (!oldRecord) return;
+
+    // Detect changed fields for audit trail
+    const changes: { field: string; label: string; oldVal: any; newVal: any }[] = [];
+    const fieldsToCheck: (keyof BunkeringRecord)[] = [
+      'keluar', 'masuk', 'nomorDn', 'pt', 'namaKapalMobil',
+      'tangki', 'pengawas', 'kotakan', 'keteranganKotakan', 'tanggal'
+    ];
+
+    const fieldLabels: Record<string, string> = {
+      keluar: 'Volume Keluar',
+      masuk: 'Volume Masuk',
+      nomorDn: 'Nomor DN',
+      pt: 'Nama PT',
+      namaKapalMobil: 'Armada / Kapal',
+      tangki: 'Tangki',
+      pengawas: 'Pengawas',
+      kotakan: 'Kotakan',
+      keteranganKotakan: 'Status Kotakan',
+      tanggal: 'Tanggal'
+    };
+
+    fieldsToCheck.forEach(f => {
+      if (oldRecord[f] !== updatedRecord[f]) {
+        changes.push({
+          field: f,
+          label: fieldLabels[f] || f,
+          oldVal: oldRecord[f],
+          newVal: updatedRecord[f]
+        });
+      }
+    });
+
+    const newLogEntry: CorrectionLogEntry = {
+      id: `corr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: new Date().toLocaleString('id-ID'),
+      recordId: updatedRecord.id,
+      nomorDn: updatedRecord.nomorDn,
+      pt: updatedRecord.pt,
+      namaKapal: updatedRecord.namaKapalMobil,
+      fieldChanges: changes,
+      reason: reason || 'Koreksi data catatan transaksi',
+      previousRecord: { ...oldRecord },
+      updatedRecord: { ...updatedRecord }
+    };
+
+    setCorrectionHistory(prev => [newLogEntry, ...prev]);
+    setRecords(prev => prev.map(r => (r.id === updatedRecord.id ? updatedRecord : r)));
+
+    // Auto-update to Google Spreadsheet if webhook is configured
+    if (webhookUrl) {
+      try {
+        await saveOrUpdateRecordToSpreadsheet(webhookUrl, updatedRecord, 'update');
+        showToast(`Koreksi data DN ${updatedRecord.nomorDn || updatedRecord.pt} berhasil disimpan & diupdate ke Google Spreadsheet!`);
+      } catch (err: any) {
+        showToast(`Koreksi disimpan lokal, namun gagal update ke sheet: ${err.message}`);
+      }
+    } else {
+      showToast(`Koreksi data DN ${updatedRecord.nomorDn || updatedRecord.pt} berhasil disimpan!`);
+    }
+  };
+
+  const handleUndoCorrection = async (logId: string) => {
+    const log = correctionHistory.find(l => l.id === logId);
+    if (!log) return;
+
+    setRecords(prev => prev.map(r => (r.id === log.recordId ? log.previousRecord : r)));
+    setCorrectionHistory(prev => prev.filter(l => l.id !== logId));
+
+    if (webhookUrl) {
+      try {
+        await saveOrUpdateRecordToSpreadsheet(webhookUrl, log.previousRecord, 'update');
+        showToast(`Perubahan DN ${log.nomorDn} dibatalkan (Undo) & Google Spreadsheet diperbarui!`);
+      } catch (err: any) {
+        showToast(`Data dikembalikan ke semula, namun gagal sync sheet: ${err.message}`);
+      }
+    } else {
+      showToast(`Perubahan DN ${log.nomorDn} berhasil dibatalkan (Undo)!`);
+    }
+  };
+
   const handleSaveWebhookUrl = (url: string) => {
     setWebhookUrl(url);
     localStorage.setItem(WEBHOOK_KEY, url);
@@ -245,10 +359,12 @@ export default function App() {
         lastSyncTime={lastSyncTime}
         sheetSource={sheetSource}
         isTwoWaySyncActive={Boolean(webhookUrl)}
+        anomalyCount={anomalies.length}
         onOpenSpreadsheetModal={() => {
           setSpreadsheetTab('url');
           setIsSpreadsheetModalOpen(true);
         }}
+        onOpenCorrectionModal={() => setIsCorrectionModalOpen(true)}
         onOpenAddModal={() => {
           setEditingRecord(null);
           setIsAddModalOpen(true);
@@ -326,6 +442,7 @@ export default function App() {
             setIsAddModalOpen(true);
           }}
           onDeleteRecord={handleDeleteRecord}
+          onOpenCorrectionModal={() => setIsCorrectionModalOpen(true)}
           unitMode={unitMode}
           density={fuelDensity}
         />
@@ -370,6 +487,23 @@ export default function App() {
         unitMode={unitMode}
         density={fuelDensity}
         initialReportType={pdfModalInitialTab}
+      />
+
+      <CorrectionModal
+        isOpen={isCorrectionModalOpen}
+        onClose={() => setIsCorrectionModalOpen(false)}
+        records={records}
+        onApplyCorrection={handleApplyCorrection}
+        onDeleteRecord={handleDeleteRecord}
+        correctionHistory={correctionHistory}
+        onUndoCorrection={handleUndoCorrection}
+        webhookUrl={webhookUrl}
+        unitMode={unitMode}
+        density={fuelDensity}
+        onOpenFullEditModal={rec => {
+          setEditingRecord(rec);
+          setIsAddModalOpen(true);
+        }}
       />
 
       {/* Footer */}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Plus, FileSpreadsheet, RefreshCw, Fuel, CheckCircle2, AlertCircle, FileText, Package } from 'lucide-react';
+import { Database, Plus, FileSpreadsheet, RefreshCw, Fuel, CheckCircle2, AlertCircle, FileText, Package, Wrench } from 'lucide-react';
 
 interface HeaderProps {
   companyName: string;
@@ -7,7 +7,9 @@ interface HeaderProps {
   lastSyncTime: string | null;
   sheetSource: 'default' | 'googlesheets' | 'custom_csv';
   isTwoWaySyncActive?: boolean;
+  anomalyCount?: number;
   onOpenSpreadsheetModal: () => void;
+  onOpenCorrectionModal: () => void;
   onOpenAddModal: () => void;
   onOpenMonthlyPdfModal: () => void;
   onOpenKotakanPdfModal: () => void;
@@ -21,7 +23,9 @@ export const Header: React.FC<HeaderProps> = ({
   lastSyncTime,
   sheetSource,
   isTwoWaySyncActive = false,
+  anomalyCount = 0,
   onOpenSpreadsheetModal,
+  onOpenCorrectionModal,
   onOpenAddModal,
   onOpenMonthlyPdfModal,
   onOpenKotakanPdfModal,
@@ -104,6 +108,24 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
               <span>Excel (.xlsx)</span>
+            </button>
+
+            <button
+              onClick={onOpenCorrectionModal}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer active:scale-95 ${
+                anomalyCount && anomalyCount > 0
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-400/50 hover:bg-amber-500/30 ring-1 ring-amber-400/30'
+                  : 'bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 hover:text-white'
+              }`}
+              title="Pusat Koreksi & Perbaikan Transaksi yang Salah Input"
+            >
+              <Wrench className="w-4 h-4 text-amber-400" />
+              <span>Koreksi Data</span>
+              {anomalyCount && anomalyCount > 0 ? (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500 text-slate-950">
+                  {anomalyCount}
+                </span>
+              ) : null}
             </button>
 
             <button

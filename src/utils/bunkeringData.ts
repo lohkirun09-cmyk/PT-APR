@@ -77,6 +77,36 @@ export interface DashboardMetrics {
   availableDates: string[];
 }
 
+export interface TransactionAnomaly {
+  id: string;
+  record: BunkeringRecord;
+  type: 'flow_mismatch' | 'duplicate_dn' | 'missing_dn' | 'zero_volume' | 'kotakan_conflict' | 'missing_vessel';
+  severity: 'warning' | 'error' | 'info';
+  title: string;
+  description: string;
+  field: keyof BunkeringRecord;
+  currentValue: any;
+  suggestedValue?: any;
+}
+
+export interface CorrectionLogEntry {
+  id: string;
+  timestamp: string;
+  recordId: string;
+  nomorDn: string;
+  pt: string;
+  namaKapal: string;
+  fieldChanges: {
+    field: string;
+    label: string;
+    oldVal: any;
+    newVal: any;
+  }[];
+  reason?: string;
+  previousRecord: BunkeringRecord;
+  updatedRecord: BunkeringRecord;
+}
+
 /**
  * Standardized Options
  */
@@ -750,10 +780,33 @@ function doPost(e) {
       data.keteranganKotakan || ""
     ];
 
+    // Jika aksi adalah 'update' dan Nomor DN disertakan, cari baris lama dan perbarui di tempat:
+    if (data.action === "update" && data.nomorDn) {
+      var lastRow = sheet.getLastRow();
+      var dnRange = sheet.getRange(1, 5, lastRow, 1).getValues();
+      var targetRow = -1;
+      for (var i = lastRow - 1; i >= 1; i--) {
+        if (String(dnRange[i][0]).trim() === String(data.nomorDn).trim()) {
+          targetRow = i + 1;
+          break;
+        }
+      }
+      if (targetRow > 0) {
+        sheet.getRange(targetRow, 1, 1, newRow.length).setValues([newRow]);
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          action: "update",
+          message: "Data transaksi DN " + data.nomorDn + " berhasil diperbarui di baris #" + targetRow + " Google Spreadsheet!",
+          row: targetRow
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     sheet.appendRow(newRow);
 
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
+      action: "append",
       message: "Data transaksi baru berhasil masuk ke Google Spreadsheet!",
       row: sheet.getLastRow(),
       pt: data.pt,
@@ -779,11 +832,12 @@ function doGet(e) {
 `;
 
 /**
- * Append transaction record to Google Spreadsheet via Apps Script Webhook
+ * Send or update transaction record to Google Spreadsheet via Apps Script Webhook
  */
-export async function appendRecordToSpreadsheet(
+export async function saveOrUpdateRecordToSpreadsheet(
   webhookUrl: string,
-  record: BunkeringRecord
+  record: BunkeringRecord,
+  action: 'append' | 'update' = 'append'
 ): Promise<{ success: boolean; message: string; row?: number }> {
   const trimmed = webhookUrl.trim();
   if (!trimmed) {
@@ -795,14 +849,14 @@ export async function appendRecordToSpreadsheet(
     const proxyRes = await fetch('/api/append-to-sheet', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ webhookUrl: trimmed, record })
+      body: JSON.stringify({ webhookUrl: trimmed, record, action })
     });
 
     if (proxyRes.ok) {
       const data = await proxyRes.json();
       return {
         success: true,
-        message: data.message || 'Transaksi berhasil ditambahkan ke Google Spreadsheet!',
+        message: data.message || (action === 'update' ? 'Data berhasil diperbarui di Google Spreadsheet!' : 'Transaksi berhasil ditambahkan ke Google Spreadsheet!'),
         row: data.details?.row
       };
     } else {
@@ -815,17 +869,137 @@ export async function appendRecordToSpreadsheet(
       await fetch(trimmed, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify(record),
+        body: JSON.stringify({ ...record, action }),
         mode: 'no-cors'
       });
       return {
         success: true,
-        message: 'Transaksi berhasil dikirim ke Google Spreadsheet!'
+        message: action === 'update'
+          ? 'Pembaruan transaksi berhasil dikirim ke Google Spreadsheet!'
+          : 'Transaksi berhasil dikirim ke Google Spreadsheet!'
       };
     } catch {
       throw new Error(`Gagal menyimpan ke Google Spreadsheet: ${err.message || 'Koneksi terputus'}`);
     }
   }
+}
+
+/**
+ * Append transaction record to Google Spreadsheet (Backwards-compatibility wrapper)
+ */
+export async function appendRecordToSpreadsheet(
+  webhookUrl: string,
+  record: BunkeringRecord
+): Promise<{ success: boolean; message: string; row?: number }> {
+  return saveOrUpdateRecordToSpreadsheet(webhookUrl, record, 'append');
+}
+
+/**
+ * Smart Anomaly & Error Detection for Bunkering Input Records
+ */
+export function detectTransactionAnomalies(records: BunkeringRecord[]): TransactionAnomaly[] {
+  const anomalies: TransactionAnomaly[] = [];
+
+  // Count DN occurrences to spot duplicates
+  const dnCounts = new Map<string, number>();
+  records.forEach(r => {
+    const dn = r.nomorDn?.trim();
+    if (dn) {
+      dnCounts.set(dn, (dnCounts.get(dn) || 0) + 1);
+    }
+  });
+
+  records.forEach((r, idx) => {
+    // 1. Flow meter difference mismatch with recorded Outflow
+    const flowDiff = (r.flowStop || 0) - (r.flowStart || 0);
+    if (r.flowStart > 0 && r.flowStop > 0 && r.keluar > 0 && flowDiff > 0 && flowDiff !== r.keluar) {
+      anomalies.push({
+        id: `anom-flow-${r.id}-${idx}`,
+        record: r,
+        type: 'flow_mismatch',
+        severity: 'warning',
+        title: 'Selisih Flow Meter Tidak Cocok dengan Volume Keluar',
+        description: `Flow meter awal: ${r.flowStart.toLocaleString('id-ID')}, akhir: ${r.flowStop.toLocaleString('id-ID')} (selisih ${flowDiff.toLocaleString('id-ID')} L), namun volume dicatat ${r.keluar.toLocaleString('id-ID')} L.`,
+        field: 'keluar',
+        currentValue: r.keluar,
+        suggestedValue: flowDiff
+      });
+    }
+
+    // 2. Duplicate DN
+    const dn = r.nomorDn?.trim();
+    if (dn && (dnCounts.get(dn) || 0) > 1) {
+      anomalies.push({
+        id: `anom-dn-dup-${r.id}-${idx}`,
+        record: r,
+        type: 'duplicate_dn',
+        severity: 'warning',
+        title: `Nomor DN "${dn}" Tercatat Ganda (${dnCounts.get(dn)} Baris)`,
+        description: `Nomor Delivery Note ini digunakan di beberapa baris transaksi. Pastikan bukan transaksi ganda yang tidak sengaja terinput dua kali.`,
+        field: 'nomorDn',
+        currentValue: dn
+      });
+    }
+
+    // 3. Zero volume in both Masuk & Keluar
+    if ((r.keluar || 0) <= 0 && (r.masuk || 0) <= 0) {
+      anomalies.push({
+        id: `anom-zero-${r.id}-${idx}`,
+        record: r,
+        type: 'zero_volume',
+        severity: 'error',
+        title: 'Volume Masuk dan Keluar Kosong (0 L)',
+        description: `Transaksi ini tidak memiliki data volume penyaluran atau penerimaan bahan bakar.`,
+        field: 'keluar',
+        currentValue: 0
+      });
+    }
+
+    // 4. Missing DN
+    if (!r.nomorDn || !r.nomorDn.trim()) {
+      anomalies.push({
+        id: `anom-dn-miss-${r.id}-${idx}`,
+        record: r,
+        type: 'missing_dn',
+        severity: 'info',
+        title: 'Nomor DN Belum Diisi',
+        description: `Delivery Note belum diinput pada transaksi tanggal ${r.tanggal} untuk ${r.pt}.`,
+        field: 'nomorDn',
+        currentValue: '-'
+      });
+    }
+
+    // 5. Missing Vessel
+    if (!r.namaKapalMobil || !r.namaKapalMobil.trim()) {
+      anomalies.push({
+        id: `anom-vessel-miss-${r.id}-${idx}`,
+        record: r,
+        type: 'missing_vessel',
+        severity: 'info',
+        title: 'Nama Kapal / Mobil Kosong',
+        description: `Armada atau nomor plat kendaraan penerima belum diisi pada transaksi DN ${r.nomorDn || '-'}.`,
+        field: 'namaKapalMobil',
+        currentValue: '-'
+      });
+    }
+
+    // 6. Kotakan Conflict (size set but status is TIDAK KASIH)
+    if (r.kotakan && r.kotakan > 0 && r.keteranganKotakan === 'TIDAK KASIH') {
+      anomalies.push({
+        id: `anom-kotak-conf-${r.id}-${idx}`,
+        record: r,
+        type: 'kotakan_conflict',
+        severity: 'warning',
+        title: 'Ukuran Kotakan Kontradiktif dengan Status "TIDAK KASIH"',
+        description: `Tercatat ${r.kotakan} kotak namun status keterangannya "TIDAK KASIH".`,
+        field: 'keteranganKotakan',
+        currentValue: r.keteranganKotakan,
+        suggestedValue: 'KASIH'
+      });
+    }
+  });
+
+  return anomalies;
 }
 
 

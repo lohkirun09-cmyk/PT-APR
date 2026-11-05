@@ -98,21 +98,22 @@ async function startServer() {
     }
   });
 
-  // Proxy endpoint to send/append record to Google Spreadsheet via Apps Script Webhook
+  // Proxy endpoint to send/append or update record in Google Spreadsheet via Apps Script Webhook
   app.post('/api/append-to-sheet', async (req, res) => {
-    const { webhookUrl, record } = req.body;
+    const { webhookUrl, record, action } = req.body;
     if (!webhookUrl || !record) {
       return res.status(400).json({ error: 'webhookUrl dan data record wajib diisi' });
     }
 
     try {
+      const payload = { ...record, action: action || 'append' };
       const response = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': 'Bunkering-Dashboard/1.0',
         },
-        body: JSON.stringify(record),
+        body: JSON.stringify(payload),
         redirect: 'follow',
       });
 
@@ -133,7 +134,9 @@ async function startServer() {
         }
         return res.json({
           success: true,
-          message: 'Data transaksi berhasil terkirim dan tercatat di Google Spreadsheet!',
+          message: action === 'update' 
+            ? 'Data koreksi transaksi berhasil diperbarui di Google Spreadsheet!'
+            : 'Data transaksi berhasil terkirim dan tercatat di Google Spreadsheet!',
           details: responseJson || responseText,
         });
       } else {
