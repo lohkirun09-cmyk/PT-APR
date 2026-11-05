@@ -11,7 +11,8 @@ import {
   Layers,
   Ship,
   Sparkles,
-  Filter
+  Filter,
+  FileSpreadsheet
 } from 'lucide-react';
 import {
   BunkeringRecord,
@@ -41,6 +42,7 @@ interface MonthlyReportModalProps {
   unitMode?: UnitMode;
   density?: number;
   initialReportType?: MonthlyReportType;
+  onExportExcel?: () => void;
 }
 
 export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
@@ -50,7 +52,8 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   companyName = 'PT. ANGKA PETROLEUM RAYA',
   unitMode = 'LITER',
   density = DEFAULT_DENSITY,
-  initialReportType = 'OPERASIONAL'
+  initialReportType = 'OPERASIONAL',
+  onExportExcel
 }) => {
   const availableMonths = useMemo(() => {
     return getAvailableMonthKeys(records);
@@ -351,6 +354,17 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 Tonase (MT)
               </button>
             </div>
+
+            {onExportExcel && (
+              <button
+                onClick={onExportExcel}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-500/40 transition-all cursor-pointer"
+                title="Unduh seluruh data dalam format spreadsheet Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Excel (.xlsx)</span>
+              </button>
+            )}
 
             <button
               onClick={handlePrint}

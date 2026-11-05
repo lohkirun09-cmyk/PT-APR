@@ -320,28 +320,6 @@ export default function App() {
     }
   };
 
-  const handleResetData = () => {
-    if (confirm('Kembalikan ke dataset awal bawaan PT ANGKA PETROLEUM RAYA?')) {
-      const defaultData = parseBunkeringCSV(INITIAL_CSV_RAW);
-      setRecords(defaultData);
-      setSheetSource('default');
-      setSourceUrl('');
-      localStorage.removeItem(SOURCE_KEY);
-      localStorage.removeItem(STORAGE_KEY);
-      setFilter({
-        startDate: '',
-        endDate: '',
-        selectedPT: 'ALL',
-        selectedPengawas: 'ALL',
-        selectedTangki: 'ALL',
-        selectedKeterangan: 'ALL',
-        selectedKotakan: 'ALL',
-        searchQuery: '',
-      });
-      showToast('Data telah direset ke dataset asli bawaan.');
-    }
-  };
-
   const handleSelectDate = (date: string) => {
     if (filter.startDate === date && filter.endDate === date) {
       setFilter({ ...filter, startDate: '', endDate: '' });
@@ -378,7 +356,6 @@ export default function App() {
           setIsMonthlyPdfModalOpen(true);
         }}
         onExportExcel={handleExportExcel}
-        onResetData={handleResetData}
       />
 
       {/* Main Container */}
@@ -487,6 +464,7 @@ export default function App() {
         unitMode={unitMode}
         density={fuelDensity}
         initialReportType={pdfModalInitialTab}
+        onExportExcel={handleExportExcel}
       />
 
       <CorrectionModal
